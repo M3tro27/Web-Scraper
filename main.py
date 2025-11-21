@@ -8,9 +8,15 @@ import json
 from bs4 import BeautifulSoup
 import ssl, certifi
 from time import sleep
+import re
 
 RUBRICS = ['domov', 'komentare', 'svet', 'ekonomika', 'panorama']
 BASE_URL = 'https://www.echo24.cz/'
+REGEX = [
+    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+(?:-?[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+)?(?:\s\d+)?(?:[a-z])?', # Zkratky jako ANO, SPD, ODS, MPSV, NÚKIB, NBÚ, MZd, MZe, ...
+    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+\s[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+', # Jména ve formátu "Jmeno Prijmeni", false positives - Motorista Gregor, Dále Schillerová atd.
+    r'(?:č\.|číslo)\s\d+\/\d{4}\s(?:Sb\.|Sbírky)' # Detekuje cisla zakonu napr. č. 1/1993 Sb., č. 2/1993 Sbírky, číslo 23/1742 Sb., číslo 2222/2222 Sbírky
+]
 
 
 def directory_creation() -> None:
@@ -83,6 +89,15 @@ def parse_rubric_page(html: str) -> list[tuple[str, str]]:
     return articles
 
 
+def use_regex(regexes: list[str], text:str) -> list[str]:
+    matches = []
+    for regex in regexes:
+        matches.extend(re.findall(regex, text))
+    matches = list(set(matches))
+    print(matches)
+    return matches
+
+
 def parse_article(html: str, url: str) -> dict[str, str]:
     """Parses article and returns JSON of it"""
     soup = BeautifulSoup(html, 'lxml')
@@ -120,6 +135,7 @@ def parse_article(html: str, url: str) -> dict[str, str]:
 
     tags_p = soup.select('.articleNewDetail__tags .btn-tag')
     tags = [tag.text for tag in tags_p]
+    tags.extend(use_regex(REGEX, full_content))
     # print(f"Tags: {tags}")
 
     data = {
