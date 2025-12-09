@@ -1,5 +1,6 @@
-from os import makedirs, listdir, fsync
+from os import makedirs, listdir
 from datetime import datetime
+
 from aiohttp import ClientSession, TCPConnector
 import asyncio
 from hashlib import md5
@@ -7,16 +8,22 @@ from dateparser import parse
 import json
 from bs4 import BeautifulSoup
 import ssl, certifi
-from time import sleep, perf_counter
+from time import sleep
 import re
 
-RUBRICS = ['domov', 'komentare', 'svet', 'ekonomika', 'panorama']
+from playwright.sync_api import sync_playwright
+
+
+BLACKLIST = ['/s/homepage', '/s/podcasty', 'https://www.blogosvet.cz?utm_source=echo_menu', '/s/specialni-prilohy']
 BASE_URL = 'https://www.echo24.cz/'
-TARGET_DIR = f'./data/echo24/{datetime.now().year}/{datetime.now().month}'
+TARGET_DIR = f'./data_pw/echo24/{datetime.now().year}/{datetime.now().month}'
 REGEX = [
-    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+(?:-?[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+)?(?:\s\d+)?(?:[a-z])?', # Zkratky jako ANO, SPD, ODS, MPSV, NÚKIB, NBÚ, MZd, MZe, ...
-    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+\s[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+', # Jména ve formátu "Jmeno Prijmeni", false positives - Motorista Gregor, Dále Schillerová atd.
-    r'(?:č\.|číslo)\s\d+\/\d{4}\s(?:Sb\.|Sbírky)' # Detekuje cisla zakonu napr. č. 1/1993 Sb., č. 2/1993 Sbírky, číslo 23/1742 Sb., číslo 2222/2222 Sbírky
+    # Zkratky jako ANO, SPD, ODS, MPSV, NÚKIB, NBÚ, MZd, MZe, ...
+    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+(?:-?[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+)?(?:\s\d+)?(?:[a-z])?',
+    # Jména ve formátu "Jmeno Prijmeni", false positives - Motorista Gregor, Dále Schillerová atd.
+    r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+\s[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+',
+    # Detekuje cisla zakonu napr. č. 1/1993 Sb., č. 2/1993 Sbírky, číslo 23/1742 Sb., číslo 2222/2222 Sbírky
+    r'(?:č\.|číslo)\s\d+\/\d{4}\s(?:Sb\.|Sbírky)'
 ]
 
 
@@ -93,7 +100,7 @@ def use_regex(regexes: list[str], text:str) -> list[str]:
     for regex in regexes:
         matches.extend(re.findall(regex, text))
     matches = list(set(matches))
-    print(matches)
+    # print(matches)
     return matches
 
 
@@ -152,7 +159,7 @@ def parse_article(html: str, url: str) -> dict[str, str]:
 
 async def scrape_rubrics(session: ClientSession, rubric: str) -> None:
     """Scrapes rubrics for today's articles"""
-    rubric_url = f'{BASE_URL}s/{rubric}'
+    rubric_url = BASE_URL[:-1] + rubric
     rubric_html = await fetch(session, rubric_url)
     article_entries = parse_rubric_page(rubric_html)
 
@@ -167,18 +174,45 @@ async def scrape_rubrics(session: ClientSession, rubric: str) -> None:
             print(f'Failed to scrape {url}: {e}')
 
 
+
 async def main() -> None:
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     async with ClientSession(connector=TCPConnector(ssl=ssl_context)) as session:
         tasks = [scrape_rubrics(session, rubric) for rubric in RUBRICS]
         await asyncio.gather(*tasks)
 
+
+def fetch_rubrics() -> list[str]:
+    """
+    Fetches rubrics using Playwright
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(BASE_URL)
+
+        menu_button = page.query_selector(".hamburger")
+        menu_button.click()
+
+        page.wait_for_selector(".js-ClickMenu")
+
+        rubrics_ul = page.query_selector(".js-ClickMenu")
+        rubrics_lis = rubrics_ul.query_selector_all("*")
+        rubric_hrefs = [href for li in rubrics_lis
+                        if (href := li.get_attribute("href")) is not None
+                        and href not in BLACKLIST
+                        ]
+
+        browser.close()
+
+        return rubric_hrefs
+
+RUBRICS = fetch_rubrics()
+
+
 if __name__ == '__main__':
     while True:
-        start = perf_counter()
         directory_creation()
         asyncio.run(main())
-        end = perf_counter()
         print("Run finished, waiting one hour...")
-        print(f'Finished in {(end - start):.2f} seconds')
         sleep(3600)
