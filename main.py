@@ -10,8 +10,6 @@ import ssl, certifi
 from time import sleep, perf_counter
 import re
 
-from playwright.sync_api import Playwright
-
 RUBRICS = ['domov', 'komentare', 'svet', 'ekonomika', 'panorama']
 BASE_URL = 'https://www.echo24.cz/'
 REGEX = [
