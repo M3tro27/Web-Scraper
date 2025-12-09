@@ -12,6 +12,7 @@ import re
 
 RUBRICS = ['domov', 'komentare', 'svet', 'ekonomika', 'panorama']
 BASE_URL = 'https://www.echo24.cz/'
+TARGET_DIR = f'./data/echo24/{datetime.now().year}/{datetime.now().month}'
 REGEX = [
     r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+(?:-?[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+)?(?:\s\d+)?(?:[a-z])?', # Zkratky jako ANO, SPD, ODS, MPSV, NÚKIB, NBÚ, MZd, MZe, ...
     r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+\s[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ][a-záčďéěíňóřšťúůýž]+', # Jména ve formátu "Jmeno Prijmeni", false positives - Motorista Gregor, Dále Schillerová atd.
@@ -21,15 +22,13 @@ REGEX = [
 
 def directory_creation() -> None:
     """Creates directory if it doesn't exist"""
-    global target_dir
-    target_dir = f'./data/echo24/{datetime.now().year}/{datetime.now().month}'
-    makedirs(target_dir, exist_ok=True)
+    makedirs(TARGET_DIR, exist_ok=True)
 
 
 def in_directory(file_name: str) -> bool:
     """Checks if file is in directory"""
     try:
-        files = listdir(target_dir)
+        files = listdir(TARGET_DIR)
         print(f"File {file_name} founded, continuing...")
         return file_name in files
     except FileNotFoundError:
@@ -39,7 +38,7 @@ def in_directory(file_name: str) -> bool:
 def write_to_file(data: dict , name: str) -> None:
     """Takes data, makes them JSON and store them to file"""
     json_data = json.dumps(data, ensure_ascii=False, indent=4)
-    with open(f"{target_dir}/{name}", "w", encoding='utf-8') as file:
+    with open(f"{TARGET_DIR}/{name}", "w", encoding='utf-8') as file:
         file.write(json_data)
 
 
