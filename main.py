@@ -7,8 +7,10 @@ from dateparser import parse
 import json
 from bs4 import BeautifulSoup
 import ssl, certifi
-from time import sleep
+from time import sleep, perf_counter
 import re
+
+from playwright.sync_api import Playwright
 
 RUBRICS = ['domov', 'komentare', 'svet', 'ekonomika', 'panorama']
 BASE_URL = 'https://www.echo24.cz/'
@@ -176,7 +178,10 @@ async def main() -> None:
 
 if __name__ == '__main__':
     while True:
+        start = perf_counter()
         directory_creation()
         asyncio.run(main())
+        end = perf_counter()
         print("Run finished, waiting one hour...")
+        print(f'Finished in {(end - start):.2f} seconds')
         sleep(3600)
