@@ -1,7 +1,14 @@
+import logging
+logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
+                        datefmt='%d/%m/%Y %H:%M:%S %p',
+                        level=logging.INFO)
+
+
 from os import makedirs, listdir
 from datetime import datetime
 
 from aiohttp import ClientSession, TCPConnector
+from aiofiles import open
 import asyncio
 from hashlib import md5
 from dateparser import parse
@@ -16,7 +23,7 @@ from playwright.sync_api import sync_playwright
 
 BLACKLIST = ['/s/homepage', '/s/podcasty', 'https://www.blogosvet.cz?utm_source=echo_menu', '/s/specialni-prilohy']
 BASE_URL = 'https://www.echo24.cz/'
-TARGET_DIR = f'./data_pw/echo24/{datetime.now().year}/{datetime.now().month}'
+TARGET_DIR = f'./data/echo24/{datetime.now().year}/{datetime.now().month}'
 REGEX = [
     # Zkratky jako ANO, SPD, ODS, MPSV, NÚKIB, NBÚ, MZd, MZe, ...
     r'[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+(?:-?[A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]{2,}+)?(?:\s\d+)?(?:[a-z])?',
@@ -30,28 +37,29 @@ REGEX = [
 def directory_creation() -> None:
     """Creates directory if it doesn't exist"""
     makedirs(TARGET_DIR, exist_ok=True)
+    logging.info('Directories created')
 
 
 def in_directory(file_name: str) -> bool:
     """Checks if file is in directory"""
     try:
         files = listdir(TARGET_DIR)
-        print(f"File {file_name} founded, continuing...")
+        logging.info(f"File {file_name} founded, continuing...")
         return file_name in files
     except FileNotFoundError:
         return False
 
 
-def write_to_file(data: dict , name: str) -> None:
+async def write_to_file(data: dict , name: str) -> None:
     """Takes data, makes them JSON and store them to file"""
     json_data = json.dumps(data, ensure_ascii=False, indent=4)
-    with open(f"{TARGET_DIR}/{name}", "w", encoding='utf-8') as file:
-        file.write(json_data)
+    async with open(f"{TARGET_DIR}/{name}", "w", encoding='utf-8') as file:
+        await file.write(json_data)
 
 
 async def fetch(session: ClientSession, url: str) -> str:
     """Returns HTML content from URL asynchronously"""
-    async with session.get(url, timeout=5) as response:
+    async with session.get(url, timeout=20) as response:
         response.raise_for_status()
         return await response.text()
 
@@ -154,25 +162,40 @@ def parse_article(html: str, url: str) -> dict[str, str]:
         'full_content': full_content,
         'tags': tags
     }
+    logging.info(f"Finished parsing {url}")
     return data
+
+
+async def parse_single_article(session: ClientSession, link: str, file_name: str):
+    """
+    Parses single article for asynchronous purposes.
+    """
+    url = f"{BASE_URL[:-1]}{link}"
+    logging.info(f"Parsing {url}")
+    try:
+        html = await fetch(session, url)
+        data = parse_article(html, url)
+        await write_to_file(data, file_name)
+        logging.info(f"Saved {file_name}")
+    except Exception as e:
+        logging.error(f"Failed to scrape {url}: {e}")
+
 
 
 async def scrape_rubrics(session: ClientSession, rubric: str) -> None:
     """Scrapes rubrics for today's articles"""
+    logging.info(f"Scraping {rubric}")
     rubric_url = BASE_URL[:-1] + rubric
     rubric_html = await fetch(session, rubric_url)
+
     article_entries = parse_rubric_page(rubric_html)
 
-    for link, file_name in article_entries:
-        url = f'{BASE_URL[:-1]}{link}'
-        try:
-            html = await fetch(session, url)
-            data = parse_article(html, url)
-            write_to_file(data, file_name)
-            print(f'Saved {file_name}')
-        except Exception as e:
-            print(f'Failed to scrape {url}: {e}')
-
+    tasks = [
+        parse_single_article(session, link, file_name)
+        for link, file_name in article_entries
+    ]
+    await asyncio.gather(*tasks)
+    logging.info(f"Finished scraping {rubric}")
 
 
 async def main() -> None:
@@ -186,6 +209,7 @@ def fetch_rubrics() -> list[str]:
     """
     Fetches rubrics using Playwright
     """
+    logging.info("Starting Playwright rubrics fetch")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -205,14 +229,19 @@ def fetch_rubrics() -> list[str]:
 
         browser.close()
 
+        logging.info("Finished Playwright rubrics fetch")
         return rubric_hrefs
 
 RUBRICS = fetch_rubrics()
 
 
 if __name__ == '__main__':
-    while True:
-        directory_creation()
-        asyncio.run(main())
-        print("Run finished, waiting one hour...")
-        sleep(3600)
+    try:
+        while True:
+            directory_creation()
+            asyncio.run(main())
+            logging.info("Run finished, waiting one hour...")
+            sleep(3600)
+    except KeyboardInterrupt:
+        logging.info("Shutting down by user")
+        print("Exiting...")
